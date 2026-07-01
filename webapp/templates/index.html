@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Environment Monitor</title>
+    <style>
+        :root { --fg: #111; --muted: #999; --bg: #fff; --rule: #e5e5e5; }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'SF Mono', 'JetBrains Mono', 'Courier New', monospace;
+            background: var(--bg);
+            color: var(--fg);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 3rem 1.5rem;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container { width: 100%; max-width: 480px; }
+
+        .header { margin-bottom: 2.5rem; }
+        .header .title {
+            font-size: 0.8rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+        .header .station {
+            font-size: 0.75rem;
+            color: var(--muted);
+            margin-top: 0.2rem;
+        }
+
+        .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            padding: 0.55rem 0;
+            border-bottom: 1px solid var(--rule);
+        }
+        .row .label {
+            font-size: 0.78rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .row .value {
+            font-size: 1.5rem;
+            font-variant-numeric: tabular-nums;
+        }
+        .row .unit {
+            font-size: 0.7rem;
+            color: var(--muted);
+            margin-left: 0.15rem;
+        }
+
+        hr { border: none; border-top: 1px solid var(--rule); margin: 1.5rem 0; }
+
+        .signal { display: flex; gap: 2.5rem; }
+        .signal .item .label {
+            font-size: 0.72rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            margin-bottom: 0.15rem;
+        }
+        .signal .item .value { font-size: 0.95rem; }
+
+        .idle { font-size: 0.8rem; color: var(--muted); margin-top: 2rem; }
+        .foot { margin-top: 2rem; font-size: 0.68rem; color: #ccc; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div class="title">Environment Monitor</div>
+        <div class="station" id="stationTag">waiting for data</div>
+    </div>
+
+    <div id="idle" class="idle">waiting for gateway...</div>
+
+    <div id="data" style="display:none;">
+        <div class="row">
+            <span class="label">Temperature</span>
+            <span><span class="value" id="tempVal">--</span><span class="unit">C</span></span>
+        </div>
+        <div class="row">
+            <span class="label">Humidity</span>
+            <span><span class="value" id="humVal">--</span><span class="unit">%</span></span>
+        </div>
+        <div class="row">
+            <span class="label">Pressure</span>
+            <span><span class="value" id="pressVal">--</span><span class="unit">hPa</span></span>
+        </div>
+
+        <hr>
+
+        <div class="signal">
+            <div class="item">
+                <div class="label">RSSI</div>
+                <div class="value" id="rssiVal">-- dBm</div>
+            </div>
+            <div class="item">
+                <div class="label">SNR</div>
+                <div class="value" id="snrVal">-- dB</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="foot" id="lastUpdate"></div>
+</div>
+
+<script>
+    const idle = document.getElementById('idle');
+    const data = document.getElementById('data');
+
+    function update(d) {
+        idle.style.display = 'none';
+        data.style.display = '';
+        document.getElementById('tempVal').textContent = d.temp.toFixed(1);
+        document.getElementById('humVal').textContent = d.hum.toFixed(1);
+        document.getElementById('pressVal').textContent = d.press.toFixed(1);
+        document.getElementById('rssiVal').textContent = d.rssi + ' dBm';
+        document.getElementById('snrVal').textContent = d.snr + ' dB';
+        document.getElementById('stationTag').textContent = 'station #' + d.station_id;
+        document.getElementById('lastUpdate').textContent = d.time;
+        document.title = d.temp.toFixed(1) + 'C';
+    }
+
+    const src = new EventSource('/events');
+    src.onmessage = function(e) {
+        try { update(JSON.parse(e.data)); } catch(_) {}
+    };
+    src.onerror = function() {
+        document.getElementById('stationTag').textContent = 'disconnected';
+    };
+</script>
+</body>
+</html>
