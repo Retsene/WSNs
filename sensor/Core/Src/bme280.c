@@ -1,23 +1,26 @@
 #include "bme280.h"
 
+static HAL_StatusTypeDef i2c_status;
+
 static uint8_t BME280_ReadReg(BME280_HandleTypeDef *bme, uint8_t reg)
 {
     uint8_t val = 0;
-    HAL_I2C_Mem_Read(bme->hi2c, bme->addr << 1, reg,
+    i2c_status = HAL_I2C_Mem_Read(bme->hi2c, bme->addr << 1, reg,
                      I2C_MEMADD_SIZE_8BIT, &val, 1, 100);
     return val;
 }
 
-static void BME280_WriteReg(BME280_HandleTypeDef *bme, uint8_t reg, uint8_t val)
+static HAL_StatusTypeDef BME280_WriteReg(BME280_HandleTypeDef *bme, uint8_t reg, uint8_t val)
 {
-    HAL_I2C_Mem_Write(bme->hi2c, bme->addr << 1, reg,
+    i2c_status = HAL_I2C_Mem_Write(bme->hi2c, bme->addr << 1, reg,
                       I2C_MEMADD_SIZE_8BIT, &val, 1, 100);
+    return i2c_status;
 }
 
 static void BME280_ReadBurst(BME280_HandleTypeDef *bme, uint8_t reg,
                              uint8_t *buf, uint8_t len)
 {
-    HAL_I2C_Mem_Read(bme->hi2c, bme->addr << 1, reg,
+    i2c_status = HAL_I2C_Mem_Read(bme->hi2c, bme->addr << 1, reg,
                      I2C_MEMADD_SIZE_8BIT, buf, len, 100);
 }
 
@@ -59,7 +62,15 @@ bool BME280_Init(BME280_HandleTypeDef *bme, I2C_HandleTypeDef *hi2c, uint8_t add
     if (id != BME280_CHIP_ID) return false;
 
     BME280_WriteReg(bme, BME280_REG_RESET, BME280_RESET_CMD);
-    HAL_Delay(10);
+    HAL_Delay(2);
+    {
+        uint8_t status;
+        int tries = 5;
+        do {
+            HAL_Delay(2);
+            BME280_ReadBurst(bme, BME280_REG_STATUS, &status, 1);
+        } while (--tries && (status & 0x01));
+    }
 
     BME280_ReadCalib(bme);
 
@@ -123,28 +134,47 @@ static uint32_t BME280_Compensate_H(BME280_HandleTypeDef *bme, int32_t adc_H)
 bool BME280_ReadAll(BME280_HandleTypeDef *bme, BME280_Data *data)
 {
     BME280_WriteReg(bme, BME280_REG_CTRL_HUM, BME280_OVERSAMPLING_1);
+    if (i2c_status != HAL_OK) goto err;
+
     BME280_WriteReg(bme, BME280_REG_CTRL_MEAS,
                     (BME280_OVERSAMPLING_1 << 5) |
                     (BME280_OVERSAMPLING_1 << 2) |
                     BME280_MODE_FORCED);
+    if (i2c_status != HAL_OK) goto err;
 
     HAL_Delay(10);
 
-    uint8_t raw[8];
-    BME280_ReadBurst(bme, BME280_REG_PRESS_MSB, raw, 8);
+    {
+        uint8_t press_msb  = BME280_ReadReg(bme, 0xF7);
+        uint8_t press_lsb  = BME280_ReadReg(bme, 0xF8);
+        uint8_t press_xlsb = BME280_ReadReg(bme, 0xF9);
+        uint8_t temp_msb   = BME280_ReadReg(bme, 0xFA);
+        uint8_t temp_lsb   = BME280_ReadReg(bme, 0xFB);
+        uint8_t temp_xlsb  = BME280_ReadReg(bme, 0xFC);
+        uint8_t hum_msb    = BME280_ReadReg(bme, 0xFD);
+        uint8_t hum_lsb    = BME280_ReadReg(bme, 0xFE);
+        if (i2c_status != HAL_OK) goto err;
 
-    int32_t adc_P = ((int32_t)raw[0] << 12) | ((int32_t)raw[1] << 4) | (raw[2] >> 4);
-    int32_t adc_T = ((int32_t)raw[3] << 12) | ((int32_t)raw[4] << 4) | (raw[5] >> 4);
-    int32_t adc_H = ((int32_t)raw[6] << 8)  | raw[7];
+        int32_t adc_p = ((int32_t)press_msb << 12) | ((int32_t)press_lsb << 4) | (press_xlsb >> 4);
+        int32_t adc_t = ((int32_t)temp_msb << 12) | ((int32_t)temp_lsb << 4) | (temp_xlsb >> 4);
+        int32_t adc_h = ((int32_t)hum_msb << 8) | hum_lsb;
 
-    int32_t t_comp = BME280_Compensate_T(bme, adc_T);
-    data->temperature = t_comp / 100.0f;
+        int32_t t_comp = BME280_Compensate_T(bme, adc_t);
+        data->temperature = t_comp / 100.0f;
 
-    uint32_t p_comp = BME280_Compensate_P(bme, adc_P);
-    data->pressure = p_comp / 25600.0f;
+        uint32_t p_var4 = BME280_Compensate_P(bme, adc_p);
+        data->pressure = (float)p_var4 / 256.0f;
 
-    uint32_t h_comp = BME280_Compensate_H(bme, adc_H);
-    data->humidity = h_comp / 1024.0f;
-
+        uint32_t h_comp = BME280_Compensate_H(bme, adc_h);
+        data->humidity = h_comp / 1024.0f;
+    }
     return true;
+
+err:
+    data->temperature = -(float)i2c_status;
+    data->humidity = 0.0f;
+    data->pressure = 0.0f;
+    HAL_I2C_DeInit(bme->hi2c);
+    HAL_I2C_Init(bme->hi2c);
+    return false;
 }

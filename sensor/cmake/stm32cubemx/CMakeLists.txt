@@ -28,6 +28,7 @@ set(MX_Application_Src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/sx1278.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/eink_display.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/power_manager.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/cmd.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../startup_stm32l071xx.s
 )
 

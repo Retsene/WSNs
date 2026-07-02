@@ -51,12 +51,21 @@
 
 #define SX1278_MAX_PACKET_SIZE   255
 
+typedef enum {
+    SX1278_CFG_POWER = 0,
+    SX1278_CFG_BALANCED,
+    SX1278_CFG_PERFORMANCE,
+    SX1278_CFG_COUNT
+} SX1278_Config;
+
 extern volatile bool sx1278_tx_done;
 
-bool SX1278_Init(void);
+bool SX1278_Init(SX1278_Config cfg);
 bool SX1278_SendPacket(uint8_t *data, uint8_t len);
 void SX1278_HardReset(void);
 void SX1278_EnterSleep(void);
 void SX1278_SetStandby(void);
+uint8_t SX1278_ReadVersion(void);
+uint8_t SX1278_ReadIrqFlags(void);
 
 #endif

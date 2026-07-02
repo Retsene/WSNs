@@ -25,7 +25,9 @@
 #include "sx1278.h"
 #include "eink_display.h"
 #include "power_manager.h"
+#include "cmd.h"
 #include <stdio.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,11 +59,19 @@ UART_HandleTypeDef huart2;
 
 #define STATION_ID 0x01
 
+static const char *lora_mode_label(SX1278_Config cfg)
+{
+    switch (cfg) {
+    case SX1278_CFG_POWER:       return "LoRa:Pwr";
+    case SX1278_CFG_BALANCED:    return "LoRa:Bal";
+    case SX1278_CFG_PERFORMANCE: return "LoRa:Perf";
+    default:                     return "LoRa: ?";
+    }
+}
+
 BME280_HandleTypeDef bme280;
 BME280_Data sensor_data;
-EINK_Config eink_config;
-char print_buf[64];
-static uint8_t seq_number = 0;
+char print_buf[128];
 
 /* USER CODE END PV */
 
@@ -122,6 +132,7 @@ int main(void)
     MX_SPI2_Init();
     MX_USART2_UART_Init();
     MX_RTC_Init();
+    CMD_Init(&huart2);
     /* USER CODE BEGIN 2 */
 
     PM_Init();
@@ -131,19 +142,25 @@ int main(void)
         Error_Handler();
     }
 
-    if (!SX1278_Init())
+    if (!SX1278_Init(g_lora_cfg))
     {
         Error_Handler();
     }
 
-    eink_config.width = EINK_WIDTH;
-    eink_config.height = EINK_HEIGHT;
-    if (!EINK_Init(&eink_config))
     {
-        Error_Handler();
+        const char *mode = lora_mode_label(g_lora_cfg);
+        snprintf(print_buf, sizeof(print_buf), "%s\r\n", mode);
+        HAL_UART_Transmit(&huart2, (uint8_t *)print_buf, strlen(print_buf), 1000);
     }
 
+    {
+        EINK_Config eink_cfg;
+        eink_cfg.width = EINK_WIDTH;
+        eink_cfg.height = EINK_HEIGHT;
+        EINK_Init(&eink_cfg);
+    }
     EINK_Clear();
+    EINK_DrawStringScaled((200 - 12*12)/2, 86, "Booting...", 2);
     EINK_Update();
     EINK_Sleep();
 
@@ -158,56 +175,85 @@ int main(void)
         /* USER CODE BEGIN 3 */
 
         BME280_ReadAll(&bme280, &sensor_data);
+        sensor_data.temperature += g_offset_temp;
+        sensor_data.humidity    += g_offset_hum;
+        sensor_data.pressure    += g_offset_pres;
 
         const int t = (int) sensor_data.temperature;
         const int t_d = (int) ((sensor_data.temperature - (float) t) * 10.0f);
         const int h = (int) sensor_data.humidity;
         const int h_d = (int) ((sensor_data.humidity - (float) h) * 10.0f);
-        const int p = (int) (sensor_data.pressure * 10.0f);
+        const int p = (int) sensor_data.pressure;
 
-        const int len = snprintf(print_buf, sizeof(print_buf),
-                           "Nhiet do: %d.%d C\r\n"
-                           "Do am:    %d.%d %%\r\n"
-                           "Ap suat:  %d.%d hPa\r\n",
-                           t, t_d < 0 ? -t_d : t_d,
-                           h, h_d < 0 ? -h_d : h_d,
-                           p / 10, p % 10);
-        HAL_UART_Transmit(&huart2, (uint8_t *) print_buf, (uint16_t) len, 1000);
+        snprintf(print_buf, sizeof(print_buf),
+                 "%s  Temp: %d.%d C  Humidity: %d.%d %%  Pres: %d Pa\r\n",
+                 lora_mode_label(g_lora_cfg),
+                 t, t_d < 0 ? -t_d : t_d,
+                 h, h_d < 0 ? -h_d : h_d, p);
+        HAL_UART_Transmit(&huart2, (uint8_t *)print_buf, strlen(print_buf), 1000);
 
-        EINK_Clear();
-        EINK_DrawString(4, 4, "Tram Do Moi Truong", 8);
-        EINK_DrawString(4, 20, print_buf, 8);
+        uint8_t payload[10];
+        {
+            int16_t te = (int16_t)(sensor_data.temperature * 10.0f);
+            int16_t he = (int16_t)(sensor_data.humidity * 10.0f);
+            uint16_t pe = (uint16_t)(sensor_data.pressure / 10.0f);
+
+            payload[0] = STATION_ID;
+            payload[1] = (te >> 8) & 0xFF;
+            payload[2] = te & 0xFF;
+            payload[3] = (he >> 8) & 0xFF;
+            payload[4] = he & 0xFF;
+            payload[5] = (pe >> 8) & 0xFF;
+            payload[6] = pe & 0xFF;
+            payload[7] = 0;
+            for (int i = 0; i < 7; i++) payload[7] ^= payload[i];
+            payload[8] = (uint8_t)(HAL_GetTick() & 0xFF);
+            payload[9] = 0xAA;
+        }
+
+        SX1278_SendPacket(payload, 10);
+        SX1278_EnterSleep();
+
+        {
+            int cx;
+
+            EINK_Clear();
+
+            snprintf(print_buf, sizeof(print_buf), "Station #01");
+            cx = (EINK_WIDTH - (int)strlen(print_buf) * 12) / 2;
+            EINK_DrawStringScaled(cx > 0 ? cx : 0, 8, print_buf, 2);
+
+            snprintf(print_buf, sizeof(print_buf), "Temp: %d.%d C",
+                     t, t_d < 0 ? -t_d : t_d);
+            cx = (EINK_WIDTH - (int)strlen(print_buf) * 12) / 2;
+            EINK_DrawStringScaled(cx > 0 ? cx : 0, 36, print_buf, 2);
+
+            snprintf(print_buf, sizeof(print_buf), "Humidity: %d.%d %%",
+                     h, h_d < 0 ? -h_d : h_d);
+            cx = (EINK_WIDTH - (int)strlen(print_buf) * 12) / 2;
+            EINK_DrawStringScaled(cx > 0 ? cx : 0, 62, print_buf, 2);
+
+            snprintf(print_buf, sizeof(print_buf), "Pres: %d Pa", p);
+            cx = (EINK_WIDTH - (int)strlen(print_buf) * 12) / 2;
+            EINK_DrawStringScaled(cx > 0 ? cx : 0, 88, print_buf, 2);
+
+            snprintf(print_buf, sizeof(print_buf), "%s", lora_mode_label(g_lora_cfg));
+            cx = (EINK_WIDTH - (int)strlen(print_buf) * 12) / 2;
+            EINK_DrawStringScaled(cx > 0 ? cx : 0, 114, print_buf, 2);
+        }
         EINK_Update();
         EINK_Sleep();
 
-        uint8_t payload[32];
+        CMD_Poll();
 
-        int16_t temp_encoded  = (int16_t)(sensor_data.temperature * 10.0f);
-        int16_t hum_encoded   = (int16_t)(sensor_data.humidity * 10.0f);
-        uint16_t press_encoded = (uint16_t)(sensor_data.pressure * 10.0f);
-
-        payload[0] = STATION_ID;
-        payload[1] = (uint8_t)((temp_encoded >> 8) & 0xFF);
-        payload[2] = (uint8_t)(temp_encoded & 0xFF);
-        payload[3] = (uint8_t)((hum_encoded >> 8) & 0xFF);
-        payload[4] = (uint8_t)(hum_encoded & 0xFF);
-        payload[5] = (uint8_t)((press_encoded >> 8) & 0xFF);
-        payload[6] = (uint8_t)(press_encoded & 0xFF);
-        payload[7] = seq_number++;
-        payload[8] = payload[0] ^ payload[1] ^ payload[2] ^ payload[3]
-                   ^ payload[4] ^ payload[5] ^ payload[6] ^ payload[7];
-        payload[9] = 0xAA;
-
-        if (!SX1278_SendPacket(payload, 10))
         {
-            SX1278_HardReset();
-            SX1278_Init();
+            uint32_t wait_end = HAL_GetTick() + g_interval_ms;
+            while (HAL_GetTick() < wait_end) {
+                CMD_Poll();
+                if (CMD_ConsumeDirty()) break;
+                HAL_Delay(100);
+            }
         }
-
-        SX1278_EnterSleep();
-        HAL_Delay(5);
-
-        PM_EnterStop(WAKEUP_INTERVAL_MINUTES * 60);
     }
     /* USER CODE END 3 */
 }

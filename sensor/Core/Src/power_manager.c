@@ -38,7 +38,7 @@ void PM_EnterStop(uint32_t seconds)
     HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
 
     HAL_RTCEx_SetWakeUpTimer(&hrtc, (uint16_t)seconds,
-                             RTC_WAKEUPCLOCK_CK_SPRE);
+                             RTC_WAKEUPCLOCK_CK_SPRE_16BITS);
 
     __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
     HAL_PWREx_EnableUltraLowPower();

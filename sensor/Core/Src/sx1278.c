@@ -58,8 +58,26 @@ static bool SX1278_CheckVersion(void)
     return (ver == 0x12);
 }
 
-bool SX1278_Init(void)
+typedef struct {
+    uint8_t pa_config;
+    uint8_t pa_dac;
+    uint8_t ocp;
+    uint8_t lna;
+    uint8_t modem_cfg1;
+    uint8_t modem_cfg2;
+    uint8_t modem_cfg3;
+} SX1278_ConfigTable;
+
+static const SX1278_ConfigTable cfg_table[SX1278_CFG_COUNT] = {
+    [SX1278_CFG_POWER]       = { 0x0F, 0x00, 0x0B, 0x03, 0x72, 0x74, 0x04 },
+    [SX1278_CFG_BALANCED]    = { 0xCF, 0x00, 0x0B, 0x23, 0x72, 0x94, 0x04 },
+    [SX1278_CFG_PERFORMANCE] = { 0xFF, 0x87, 0x1F, 0x23, 0x82, 0xC4, 0x04 },
+};
+
+bool SX1278_Init(SX1278_Config cfg)
 {
+    if (cfg >= SX1278_CFG_COUNT) return false;
+
     SX1278_HardReset();
 
     bool ok = SX1278_CheckVersion();
@@ -75,15 +93,17 @@ bool SX1278_Init(void)
     SX1278_WriteReg(SX1278_REG_FRF_MID, (frf >> 8) & 0xFF);
     SX1278_WriteReg(SX1278_REG_FRF_LSB, frf & 0xFF);
 
-    SX1278_WriteReg(SX1278_REG_PA_CONFIG, 0x8F);
+    const SX1278_ConfigTable *c = &cfg_table[cfg];
+    SX1278_WriteReg(SX1278_REG_PA_CONFIG, c->pa_config);
     SX1278_WriteReg(SX1278_REG_PA_RAMP, 0x09);
-    SX1278_WriteReg(SX1278_REG_OCP, 0x0B);
-    SX1278_WriteReg(SX1278_REG_LNA, 0x23);
-    SX1278_WriteReg(SX1278_REG_PA_DAC, 0x84);
-
-    SX1278_WriteReg(SX1278_REG_MODEM_CONFIG_1, 0x72);
-    SX1278_WriteReg(SX1278_REG_MODEM_CONFIG_2, 0x74);
-    SX1278_WriteReg(SX1278_REG_MODEM_CONFIG_3, 0x04);
+    SX1278_WriteReg(SX1278_REG_OCP, c->ocp);
+    SX1278_WriteReg(SX1278_REG_LNA, c->lna);
+    if (c->pa_dac) {
+        SX1278_WriteReg(SX1278_REG_PA_DAC, c->pa_dac);
+    }
+    SX1278_WriteReg(SX1278_REG_MODEM_CONFIG_1, c->modem_cfg1);
+    SX1278_WriteReg(SX1278_REG_MODEM_CONFIG_2, c->modem_cfg2);
+    SX1278_WriteReg(SX1278_REG_MODEM_CONFIG_3, c->modem_cfg3);
 
     SX1278_WriteReg(SX1278_REG_FIFO_TX_BASE_ADDR, 0x00);
     SX1278_WriteReg(SX1278_REG_FIFO_RX_BASE_ADDR, 0x00);
@@ -108,19 +128,21 @@ bool SX1278_SendPacket(uint8_t *data, uint8_t len)
 
     sx1278_tx_done = false;
 
-    SX1278_WriteReg(SX1278_REG_IRQ_FLAGS, 0xFF);
     SX1278_WriteReg(SX1278_REG_OP_MODE, SX1278_MODE_LONG_RANGE | SX1278_MODE_TX);
 
     uint32_t timeout = HAL_GetTick() + 5000;
-    while (!sx1278_tx_done)
+    while (1)
     {
-        if (HAL_GetTick() > timeout)
+        uint8_t flags = SX1278_ReadReg(SX1278_REG_IRQ_FLAGS);
+        if (flags & 0x08)
         {
-            SX1278_HardReset();
-            SX1278_Init();
-            return false;
+            sx1278_tx_done = true;
+            break;
         }
+        if (HAL_GetTick() > timeout) break;
     }
+
+    if (!sx1278_tx_done) return false;
 
     SX1278_WriteReg(SX1278_REG_IRQ_FLAGS, 0xFF);
     return true;
@@ -134,6 +156,16 @@ void SX1278_EnterSleep(void)
 void SX1278_SetStandby(void)
 {
     SX1278_WriteReg(SX1278_REG_OP_MODE, SX1278_MODE_LONG_RANGE | SX1278_MODE_STDBY);
+}
+
+uint8_t SX1278_ReadVersion(void)
+{
+    return SX1278_ReadReg(SX1278_REG_VERSION);
+}
+
+uint8_t SX1278_ReadIrqFlags(void)
+{
+    return SX1278_ReadReg(SX1278_REG_IRQ_FLAGS);
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)

@@ -6,6 +6,8 @@ extern SPI_HandleTypeDef hspi2;
 static uint8_t fb[EINK_BUFF_SIZE];
 static uint16_t e_w = EINK_WIDTH;
 static uint16_t e_h = EINK_HEIGHT;
+static bool sleeping = false;
+static void EINK_WakeInternal(void);
 
 static const uint8_t font_8x6[96][6] = {
     {0x00,0x00,0x00,0x00,0x00,0x00}, /*   */
@@ -151,8 +153,10 @@ static bool EINK_Busy(void)
 
 static void EINK_WaitBusy(void)
 {
+    uint32_t timeout = HAL_GetTick() + 30000;
     while (EINK_Busy())
     {
+        if (HAL_GetTick() > timeout) break;
         HAL_Delay(1);
     }
 }
@@ -165,14 +169,34 @@ static void EINK_Reset(void)
     HAL_Delay(10);
 }
 
-static void EINK_SetCursorXY(uint16_t x, uint16_t y)
+static void EINK_SetRamArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
 {
+    EINK_SendCmd(0x11);
+    EINK_SendData(0x03);
+
+    EINK_SendCmd(0x44);
+    EINK_SendData(x / 8);
+    EINK_SendData((x + w - 1) / 8);
+
+    EINK_SendCmd(0x45);
+    EINK_SendData(y & 0xFF);
+    EINK_SendData((y >> 8) & 0xFF);
+    EINK_SendData((y + h - 1) & 0xFF);
+    EINK_SendData(((y + h - 1) >> 8) & 0xFF);
+
     EINK_SendCmd(0x4E);
-    EINK_SendData(x & 0xFF);
+    EINK_SendData(x / 8);
 
     EINK_SendCmd(0x4F);
     EINK_SendData(y & 0xFF);
     EINK_SendData((y >> 8) & 0xFF);
+}
+
+static void EINK_WriteFB(uint8_t cmd)
+{
+    EINK_SetRamArea(0, 0, e_w, e_h);
+    EINK_SendCmd(cmd);
+    EINK_SendDataBurst(fb, EINK_BUFF_SIZE);
 }
 
 bool EINK_Init(EINK_Config *cfg)
@@ -181,6 +205,7 @@ bool EINK_Init(EINK_Config *cfg)
     e_h = cfg->height;
 
     EINK_Reset();
+    HAL_Delay(10);
 
     EINK_SendCmd(0x12);
     HAL_Delay(10);
@@ -188,19 +213,6 @@ bool EINK_Init(EINK_Config *cfg)
 
     EINK_SendCmd(0x01);
     EINK_SendData(0xC7);
-    EINK_SendData(0x00);
-    EINK_SendData(0x01);
-
-    EINK_SendCmd(0x11);
-    EINK_SendData(0x01);
-
-    EINK_SendCmd(0x44);
-    EINK_SendData(0x00);
-    EINK_SendData(0x18);
-
-    EINK_SendCmd(0x45);
-    EINK_SendData(0xC7);
-    EINK_SendData(0x00);
     EINK_SendData(0x00);
     EINK_SendData(0x00);
 
@@ -210,11 +222,7 @@ bool EINK_Init(EINK_Config *cfg)
     EINK_SendCmd(0x18);
     EINK_SendData(0x80);
 
-    EINK_SendCmd(0x21);
-    EINK_SendData(0x00);
-    EINK_SendData(0x80);
-
-    EINK_SetCursorXY(0, 0);
+    EINK_SetRamArea(0, 0, e_w, e_h);
 
     memset(fb, 0xFF, sizeof(fb));
 
@@ -228,16 +236,13 @@ void EINK_Clear(void)
 
 void EINK_Update(void)
 {
-    EINK_SetCursorXY(0, 0);
-    EINK_SendCmd(0x24);
-    EINK_SendDataBurst(fb, EINK_BUFF_SIZE);
+    EINK_WakeInternal();
 
-    EINK_SetCursorXY(0, 0);
-    EINK_SendCmd(0x26);
-    EINK_SendDataBurst(fb, EINK_BUFF_SIZE);
+    EINK_WriteFB(0x26);
+    EINK_WriteFB(0x24);
 
     EINK_SendCmd(0x22);
-    EINK_SendData(0xF4);
+    EINK_SendData(0xF7);
     EINK_SendCmd(0x20);
     EINK_WaitBusy();
 }
@@ -251,6 +256,27 @@ void EINK_Sleep(void)
 
     EINK_SendCmd(0x10);
     EINK_SendData(0x01);
+    sleeping = true;
+}
+
+static void EINK_WakeInternal(void)
+{
+    if (!sleeping) return;
+    EINK_Reset();
+    HAL_Delay(10);
+    EINK_SendCmd(0x12);
+    HAL_Delay(10);
+    EINK_WaitBusy();
+    EINK_SendCmd(0x01);
+    EINK_SendData(0xC7);
+    EINK_SendData(0x00);
+    EINK_SendData(0x00);
+    EINK_SendCmd(0x3C);
+    EINK_SendData(0x05);
+    EINK_SendCmd(0x18);
+    EINK_SendData(0x80);
+    EINK_SetRamArea(0, 0, e_w, e_h);
+    sleeping = false;
 }
 
 void EINK_DrawString(int x, int y, const char *str, uint8_t size)
@@ -286,6 +312,47 @@ void EINK_DrawString(int x, int y, const char *str, uint8_t size)
         {
             x += 6;
         }
+        str++;
+    }
+}
+
+void EINK_DrawStringScaled(int x, int y, const char *str, uint8_t scale)
+{
+    if (scale == 0) return;
+
+    while (*str)
+    {
+        uint8_t c = (uint8_t)*str;
+        if (c < ' ' || c > '~') c = ' ';
+        c -= ' ';
+
+        for (uint8_t i = 0; i < 6; i++)
+        {
+            uint8_t col = font_8x6[c][i];
+            for (uint8_t m = 0; m < 8; m++)
+            {
+                if (col & 0x01)
+                {
+                    uint16_t bx = (uint16_t)(x + i * scale);
+                    uint16_t by = (uint16_t)(y + m * scale);
+                    for (uint8_t sy = 0; sy < scale; sy++)
+                    {
+                        for (uint8_t sx = 0; sx < scale; sx++)
+                        {
+                            uint16_t px = bx + sx;
+                            uint16_t py = by + sy;
+                            if (px < e_w && py < e_h)
+                            {
+                                uint32_t addr = (px / 8) + py * EINK_W_BUFF_SIZE;
+                                fb[addr] &= ~(0x80 >> (px % 8));
+                            }
+                        }
+                    }
+                }
+                col >>= 1;
+            }
+        }
+        x += 6 * scale;
         str++;
     }
 }

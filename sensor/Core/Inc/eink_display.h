@@ -24,6 +24,7 @@ void EINK_Clear(void);
 void EINK_Update(void);
 void EINK_Sleep(void);
 void EINK_DrawString(int x, int y, const char *str, uint8_t size);
+void EINK_DrawStringScaled(int x, int y, const char *str, uint8_t scale);
 void EINK_LoadImage(const uint8_t *image);
 
 #endif
