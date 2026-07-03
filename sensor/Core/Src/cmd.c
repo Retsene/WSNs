@@ -12,8 +12,8 @@ static UART_HandleTypeDef *cmd_huart;
 static char rx_buf[64];
 static uint8_t rx_idx;
 
-SX1278_Config g_lora_cfg = SX1278_CFG_BALANCED;
-uint32_t g_interval_ms = 60000;
+SX1278_Config g_lora_cfg = SX1278_CFG_PERFORMANCE;
+uint32_t g_interval_ms = 5000;
 float g_offset_temp = 0.0f;
 float g_offset_hum = 0.0f;
 float g_offset_pres = 0.0f;

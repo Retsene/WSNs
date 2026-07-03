@@ -61,11 +61,13 @@ typedef enum {
 extern volatile bool sx1278_tx_done;
 
 bool SX1278_Init(SX1278_Config cfg);
-bool SX1278_SendPacket(uint8_t *data, uint8_t len);
+bool SX1278_SendPacket(uint8_t *data, uint8_t len, SX1278_Config cfg);
 void SX1278_HardReset(void);
 void SX1278_EnterSleep(void);
 void SX1278_SetStandby(void);
 uint8_t SX1278_ReadVersion(void);
 uint8_t SX1278_ReadIrqFlags(void);
+uint8_t SX1278_ReadReg(uint8_t reg);
+void SX1278_WriteReg(uint8_t reg, uint8_t val);
 
 #endif

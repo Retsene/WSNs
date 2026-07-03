@@ -119,6 +119,8 @@ int main(void)
 
     if (!SX1278_Init())
     {
+        const char *fail = "--- LoRa Init FAILED ---\r\n";
+        HAL_UART_Transmit(&huart2, (uint8_t *)fail, 24, 1000);
         Error_Handler();
     }
 
@@ -137,31 +139,23 @@ int main(void)
 
         SX1278_StartRX();
 
-        uint32_t rx_timeout = HAL_GetTick() + 900000; // 15 min timeout
-        while (!sx1278_rx_done)
+        rx_len = 0;
+        uint32_t rx_timeout = HAL_GetTick() + 900000;
+
+        while (1)
         {
-            if (HAL_GetTick() > rx_timeout)
-            {
-                break;
-            }
-            __WFI();
+            if (SX1278_ReadPacket(rx_payload, &rx_len)) break;
+            if (HAL_GetTick() > rx_timeout) break;
+            HAL_Delay(200);
         }
 
-        if (!sx1278_rx_done)
-        {
-            continue;
-        }
-
-        if (!SX1278_ReadPacket(rx_payload, &rx_len))
-        {
-            continue;
-        }
+        if (rx_len == 0) continue;
 
         // Validate checksum and magic byte
         uint8_t cksum = rx_payload[0] ^ rx_payload[1] ^ rx_payload[2]
                       ^ rx_payload[3] ^ rx_payload[4] ^ rx_payload[5]
-                      ^ rx_payload[6] ^ rx_payload[7];
-        if (cksum != rx_payload[8] || rx_payload[9] != 0xAA)
+                      ^ rx_payload[6];
+        if (cksum != rx_payload[7] || rx_payload[9] != 0xAA)
         {
             continue;
         }

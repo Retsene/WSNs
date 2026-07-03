@@ -25,7 +25,11 @@
 #define SX1278_REG_PKT_RSSI_VALUE 0x1A
 #define SX1278_REG_MODEM_CONFIG_1 0x1D
 #define SX1278_REG_MODEM_CONFIG_2 0x1E
+#define SX1278_REG_SYMB_TIMEOUT_LSB 0x1F
 #define SX1278_REG_MODEM_CONFIG_3 0x26
+#define SX1278_REG_PREAMBLE_MSB  0x20
+#define SX1278_REG_PREAMBLE_LSB  0x21
+#define SX1278_REG_SYNC_WORD     0x39
 #define SX1278_REG_PAYLOAD_LENGTH 0x22
 #define SX1278_REG_FIFO_RX_BYTE_ADDR 0x25
 #define SX1278_REG_DIO_MAPPING_1 0x40
@@ -65,5 +69,7 @@ void SX1278_StartRX(void);
 bool SX1278_ReadPacket(uint8_t *data, uint8_t *len);
 int SX1278_GetLastRSSI(void);
 int SX1278_GetLastSNR(void);
+uint8_t SX1278_ReadIrqFlags(void);
+void SX1278_ClearIRQ(void);
 
 #endif

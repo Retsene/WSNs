@@ -133,14 +133,17 @@ int main(void)
     MX_USART2_UART_Init();
     MX_RTC_Init();
     CMD_Init(&huart2);
-    /* USER CODE BEGIN 2 */
+
+    HAL_UART_Transmit(&huart2, (uint8_t *)"cmd ok\r\n", 8, 1000);
 
     PM_Init();
+    HAL_UART_Transmit(&huart2, (uint8_t *)"pm ok\r\n", 7, 1000);
 
     if (!BME280_Init(&bme280, &hi2c3, BME280_I2C_ADDR_PRIM))
     {
         Error_Handler();
     }
+    HAL_UART_Transmit(&huart2, (uint8_t *)"bme ok\r\n", 8, 1000);
 
     if (!SX1278_Init(g_lora_cfg))
     {
@@ -149,7 +152,7 @@ int main(void)
 
     {
         const char *mode = lora_mode_label(g_lora_cfg);
-        snprintf(print_buf, sizeof(print_buf), "%s\r\n", mode);
+        snprintf(print_buf, sizeof(print_buf), "lora:%s\r\n", mode);
         HAL_UART_Transmit(&huart2, (uint8_t *)print_buf, strlen(print_buf), 1000);
     }
 
@@ -163,6 +166,7 @@ int main(void)
     EINK_DrawStringScaled((200 - 12*12)/2, 86, "Booting...", 2);
     EINK_Update();
     EINK_Sleep();
+    HAL_UART_Transmit(&huart2, (uint8_t *)"rdy\r\n", 5, 1000);
 
     /* USER CODE END 2 */
 
@@ -182,14 +186,13 @@ int main(void)
         const int t = (int) sensor_data.temperature;
         const int t_d = (int) ((sensor_data.temperature - (float) t) * 10.0f);
         const int h = (int) sensor_data.humidity;
-        const int h_d = (int) ((sensor_data.humidity - (float) h) * 10.0f);
-        const int p = (int) sensor_data.pressure;
+        int p_kpa = (int)(sensor_data.pressure / 1000.0f);
+        int p_dec = ((int)(sensor_data.pressure / 100.0f) % 10);
 
         snprintf(print_buf, sizeof(print_buf),
-                 "%s  Temp: %d.%d C  Humidity: %d.%d %%  Pres: %d Pa\r\n",
+                 "%s  Temp:%d.%dC  Hum:%d%%  Pres:%d.%dkPa\r\n",
                  lora_mode_label(g_lora_cfg),
-                 t, t_d < 0 ? -t_d : t_d,
-                 h, h_d < 0 ? -h_d : h_d, p);
+                 t, t_d < 0 ? -t_d : t_d, h, p_kpa, p_dec);
         HAL_UART_Transmit(&huart2, (uint8_t *)print_buf, strlen(print_buf), 1000);
 
         uint8_t payload[10];
@@ -211,32 +214,29 @@ int main(void)
             payload[9] = 0xAA;
         }
 
-        SX1278_SendPacket(payload, 10);
-        SX1278_EnterSleep();
+        uint8_t ver = SX1278_ReadVersion();
+        uint8_t mode = SX1278_ReadReg(SX1278_REG_OP_MODE);
+        bool tx_ok = SX1278_SendPacket(payload, 10, g_lora_cfg);
+        snprintf(print_buf, sizeof(print_buf), "Ver:0x%02X Mode:0x%02X Tx:%s\r\n",
+                 ver, mode, tx_ok ? "OK" : "FAIL");
+        HAL_UART_Transmit(&huart2, (uint8_t *)print_buf, strlen(print_buf), 1000);
 
         {
             int cx;
-
             EINK_Clear();
-
             snprintf(print_buf, sizeof(print_buf), "Station #01");
             cx = (EINK_WIDTH - (int)strlen(print_buf) * 12) / 2;
             EINK_DrawStringScaled(cx > 0 ? cx : 0, 8, print_buf, 2);
-
             snprintf(print_buf, sizeof(print_buf), "Temp: %d.%d C",
                      t, t_d < 0 ? -t_d : t_d);
             cx = (EINK_WIDTH - (int)strlen(print_buf) * 12) / 2;
             EINK_DrawStringScaled(cx > 0 ? cx : 0, 36, print_buf, 2);
-
-            snprintf(print_buf, sizeof(print_buf), "Humidity: %d.%d %%",
-                     h, h_d < 0 ? -h_d : h_d);
+            snprintf(print_buf, sizeof(print_buf), "Humidity: %d %%", h);
             cx = (EINK_WIDTH - (int)strlen(print_buf) * 12) / 2;
             EINK_DrawStringScaled(cx > 0 ? cx : 0, 62, print_buf, 2);
-
-            snprintf(print_buf, sizeof(print_buf), "Pres: %d Pa", p);
+            snprintf(print_buf, sizeof(print_buf), "Pres: %d.%d kPa", p_kpa, p_dec);
             cx = (EINK_WIDTH - (int)strlen(print_buf) * 12) / 2;
             EINK_DrawStringScaled(cx > 0 ? cx : 0, 88, print_buf, 2);
-
             snprintf(print_buf, sizeof(print_buf), "%s", lora_mode_label(g_lora_cfg));
             cx = (EINK_WIDTH - (int)strlen(print_buf) * 12) / 2;
             EINK_DrawStringScaled(cx > 0 ? cx : 0, 114, print_buf, 2);

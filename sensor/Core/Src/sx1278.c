@@ -14,7 +14,7 @@ static void SX1278_CS_HIGH(void)
     HAL_GPIO_WritePin(LORA_NSS_GPIO_Port, LORA_NSS_Pin, GPIO_PIN_SET);
 }
 
-static uint8_t SX1278_ReadReg(uint8_t reg)
+uint8_t SX1278_ReadReg(uint8_t reg)
 {
     uint8_t addr = reg & 0x7F;
     uint8_t val;
@@ -25,7 +25,7 @@ static uint8_t SX1278_ReadReg(uint8_t reg)
     return val;
 }
 
-static void SX1278_WriteReg(uint8_t reg, uint8_t val)
+void SX1278_WriteReg(uint8_t reg, uint8_t val)
 {
     uint8_t buf[2];
     buf[0] = reg | 0x80;
@@ -69,7 +69,7 @@ typedef struct {
 } SX1278_ConfigTable;
 
 static const SX1278_ConfigTable cfg_table[SX1278_CFG_COUNT] = {
-    [SX1278_CFG_POWER]       = { 0x0F, 0x00, 0x0B, 0x03, 0x72, 0x74, 0x04 },
+    [SX1278_CFG_POWER]       = { 0x8C, 0x00, 0x0B, 0x23, 0x72, 0x74, 0x04 },
     [SX1278_CFG_BALANCED]    = { 0xCF, 0x00, 0x0B, 0x23, 0x72, 0x94, 0x04 },
     [SX1278_CFG_PERFORMANCE] = { 0xFF, 0x87, 0x1F, 0x23, 0x82, 0xC4, 0x04 },
 };
@@ -105,6 +105,8 @@ bool SX1278_Init(SX1278_Config cfg)
     SX1278_WriteReg(SX1278_REG_MODEM_CONFIG_2, c->modem_cfg2);
     SX1278_WriteReg(SX1278_REG_MODEM_CONFIG_3, c->modem_cfg3);
 
+    SX1278_WriteReg(0x39, 0x12);
+
     SX1278_WriteReg(SX1278_REG_FIFO_TX_BASE_ADDR, 0x00);
     SX1278_WriteReg(SX1278_REG_FIFO_RX_BASE_ADDR, 0x00);
 
@@ -116,8 +118,10 @@ bool SX1278_Init(SX1278_Config cfg)
     return true;
 }
 
-bool SX1278_SendPacket(uint8_t *data, uint8_t len)
+bool SX1278_SendPacket(uint8_t *data, uint8_t len, SX1278_Config cfg)
 {
+    (void)cfg;
+
     if (len > SX1278_MAX_PACKET_SIZE) return false;
 
     SX1278_WriteReg(SX1278_REG_OP_MODE, SX1278_MODE_LONG_RANGE | SX1278_MODE_STDBY);
@@ -142,9 +146,10 @@ bool SX1278_SendPacket(uint8_t *data, uint8_t len)
         if (HAL_GetTick() > timeout) break;
     }
 
+    SX1278_WriteReg(SX1278_REG_IRQ_FLAGS, 0xFF);
+
     if (!sx1278_tx_done) return false;
 
-    SX1278_WriteReg(SX1278_REG_IRQ_FLAGS, 0xFF);
     return true;
 }
 
